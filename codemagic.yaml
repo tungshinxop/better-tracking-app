@@ -1,0 +1,72 @@
+workflows:
+  ios-unsigned:
+    name: Unsigned IPA + APK with install QR
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      groups:
+        - github # holds GITHUB_TOKEN (fine-grained PAT, Contents: read & write on this repo)
+      vars:
+        IPA_NAME: app-unsigned.ipa
+        APK_NAME: app-release.apk
+        BUILD_MODE: release
+        KEEP_RELEASES: "5"
+    scripts:
+      - name: Get packages
+        script: flutter pub get
+
+      - name: Build iOS without code signing
+        script: flutter build ios --$BUILD_MODE --no-codesign
+
+      - name: Package Runner.app into IPA
+        script: |
+          set -euo pipefail
+          APP_DIR="build/ios/iphoneos/Runner.app"
+          test -d "$APP_DIR" || { echo "Runner.app not found at $APP_DIR"; exit 1; }
+          rm -rf build/ipa build/out && mkdir -p build/ipa/Payload build/out
+          cp -R "$APP_DIR" build/ipa/Payload/
+          (cd build/ipa && zip -qry "../out/$IPA_NAME" Payload)
+          ls -lh build/out
+
+      - name: Build Android APK
+        script: |
+          set -euo pipefail
+          flutter build apk --$BUILD_MODE
+          cp "build/app/outputs/flutter-apk/app-$BUILD_MODE.apk" "build/out/$APK_NAME"
+
+      - name: Publish GitHub release with install QR codes
+        script: |
+          set -euo pipefail
+          if [ -z "${GITHUB_TOKEN:-}" ]; then
+            echo "GITHUB_TOKEN not set (env group 'github'); skipping release."
+            exit 0
+          fi
+          export GH_TOKEN="$GITHUB_TOKEN"
+          export GH_REPO="$(git remote get-url origin | sed -E 's#(\.git)?$##; s#^.*github\.com[:/]##')"
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install qrencode >/dev/null
+          command -v gh >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install gh >/dev/null
+
+          BASE="https://github.com/$GH_REPO/releases/latest/download"
+          qrencode -s 10 -m 2 -o build/out/install-ios-qr.png "$BASE/$IPA_NAME"
+          qrencode -s 10 -m 2 -o build/out/install-android-qr.png "$BASE/$APK_NAME"
+
+          TAG="cm-build-${BUILD_NUMBER}"
+          SHA="$(git rev-parse HEAD)"
+          printf '%s\n' \
+            "Codemagic build #${BUILD_NUMBER} from \`${SHA:0:7}\` ($BUILD_MODE)." "" \
+            "**iOS (unsigned):** scan the QR code or open $BASE/$IPA_NAME on the iPhone, then share the file to SideStore." "" \
+            "**Android:** $BASE/$APK_NAME" > build/release-notes.md
+          gh release create "$TAG" build/out/* --target "$SHA" \
+            --title "Build #${BUILD_NUMBER}" --notes-file build/release-notes.md --latest
+
+          gh release list --limit 100 --json tagName,createdAt \
+            --jq "sort_by(.createdAt) | reverse | .[${KEEP_RELEASES}:] | .[].tagName" \
+          | grep -E '^(cm-)?build-' \
+          | while read -r tag; do gh release delete "$tag" --yes --cleanup-tag; done || true
+
+          echo "iOS:     $BASE/$IPA_NAME"
+          echo "Android: $BASE/$APK_NAME"
+    artifacts:
+      - build/out/*
