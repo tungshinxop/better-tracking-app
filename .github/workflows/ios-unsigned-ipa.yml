@@ -1,0 +1,171 @@
+name: iOS unsigned IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      flutter_version:
+        description: "Flutter version (blank = latest stable)"
+        required: false
+        default: ""
+      build_mode:
+        description: "Build mode"
+        required: false
+        default: "release"
+        type: choice
+        options: [release, profile, debug]
+      include_android:
+        description: "Also build an Android APK into the same release"
+        required: false
+        default: true
+        type: boolean
+      publish_release:
+        description: "Publish a GitHub Release with install QR codes (needs a public repo for phone downloads)"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  IPA_NAME: app-unsigned.ipa
+  APK_NAME: app-release.apk
+  KEEP_RELEASES: 5
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ inputs.flutter_version }}
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS app without code signing
+        run: flutter build ios --${{ inputs.build_mode }} --no-codesign
+
+      - name: Package Runner.app into IPA
+        run: |
+          set -euo pipefail
+          APP_DIR="build/ios/iphoneos/Runner.app"
+          test -d "$APP_DIR" || { echo "Runner.app not found at $APP_DIR"; exit 1; }
+          rm -rf build/ipa && mkdir -p build/ipa/Payload
+          cp -R "$APP_DIR" build/ipa/Payload/
+          cd build/ipa
+          zip -qry "../$IPA_NAME" Payload
+          ls -lh "../$IPA_NAME"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-ipa
+          path: build/${{ env.IPA_NAME }}
+          retention-days: 7
+          if-no-files-found: error
+
+  build-android:
+    if: ${{ inputs.include_android }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ inputs.flutter_version }}
+          cache: true
+
+      - name: Build APK
+        run: |
+          flutter pub get
+          flutter build apk --${{ inputs.build_mode }}
+          cp "build/app/outputs/flutter-apk/app-${{ inputs.build_mode }}.apk" "build/$APK_NAME"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: build/${{ env.APK_NAME }}
+          retention-days: 7
+          if-no-files-found: error
+
+  release:
+    needs: [build-ios, build-android]
+    if: ${{ !cancelled() && inputs.publish_release && needs.build-ios.result == 'success' && needs.build-android.result != 'failure' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Generate install QR codes
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq qrencode >/dev/null
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download"
+          qrencode -s 10 -m 2 -o out/install-ios-qr.png "$BASE/$IPA_NAME"
+          if [ -f "out/$APK_NAME" ]; then
+            qrencode -s 10 -m 2 -o out/install-android-qr.png "$BASE/$APK_NAME"
+          fi
+          echo "IOS_URL=$BASE/$IPA_NAME" >> "$GITHUB_ENV"
+          echo "APK_URL=$BASE/$APK_NAME" >> "$GITHUB_ENV"
+          ls -lh out
+
+      - name: Publish release
+        run: |
+          set -euo pipefail
+          TAG="build-${GITHUB_RUN_NUMBER}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          {
+            echo "Build #${GITHUB_RUN_NUMBER} from \`${SHORT_SHA}\` (${{ inputs.build_mode }})."
+            echo
+            echo "**iOS (unsigned):** scan the QR code or open ${IOS_URL} on the iPhone, then share the file to SideStore to install."
+            if [ -f "out/$APK_NAME" ]; then
+              echo
+              echo "**Android:** ${APK_URL}"
+            fi
+          } > notes.md
+          gh release create "$TAG" out/* \
+            --target "$GITHUB_SHA" \
+            --title "Build #${GITHUB_RUN_NUMBER}" \
+            --notes-file notes.md \
+            --latest
+
+      - name: Remove old releases
+        run: |
+          gh release list --limit 100 --json tagName,createdAt \
+            --jq "sort_by(.createdAt) | reverse | .[${KEEP_RELEASES}:] | .[].tagName" \
+          | grep '^build-' \
+          | while read -r tag; do
+              echo "Deleting old release $tag"
+              gh release delete "$tag" --yes --cleanup-tag
+            done || true
+
+      - name: Summary
+        run: |
+          {
+            echo "## Install"
+            echo
+            echo "| iOS (SideStore) | Android |"
+            echo "|---|---|"
+            echo "| ![iOS QR](${IOS_URL%/*}/install-ios-qr.png) | ![Android QR](${APK_URL%/*}/install-android-qr.png) |"
+            echo
+            echo "Stable links (always the newest build):"
+            echo "- iOS: ${IOS_URL}"
+            echo "- Android: ${APK_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
