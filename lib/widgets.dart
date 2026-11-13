@@ -199,6 +199,99 @@ Future<bool> confirmDialog(
   return result ?? false;
 }
 
+Future<String?> promptText(
+  BuildContext context, {
+  required String title,
+  String initial = '',
+  String label = 'Name',
+  String confirmLabel = 'Save',
+  String? message,
+}) {
+  return showDialog<String>(
+    context: context,
+    builder: (_) => _PromptDialog(
+      title: title,
+      initial: initial,
+      label: label,
+      confirmLabel: confirmLabel,
+      message: message,
+    ),
+  );
+}
+
+class _PromptDialog extends StatefulWidget {
+  const _PromptDialog({
+    required this.title,
+    required this.initial,
+    required this.label,
+    required this.confirmLabel,
+    this.message,
+  });
+
+  final String title;
+  final String initial;
+  final String label;
+  final String confirmLabel;
+  final String? message;
+
+  @override
+  State<_PromptDialog> createState() => _PromptDialogState();
+}
+
+class _PromptDialogState extends State<_PromptDialog> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() => Navigator.pop(context, _controller.text.trim());
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (widget.message != null) ...[
+              Text(widget.message!, style: const TextStyle(color: AppColors.textSecondary)),
+              const SizedBox(height: 12),
+            ],
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                labelText: widget.label,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Not now')),
+        TextButton(onPressed: _submit, child: Text(widget.confirmLabel)),
+      ],
+    );
+  }
+}
+
+String formatLongDate(DateTime date) {
+  const months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ];
+  return '${date.day} ${months[date.month - 1]} ${date.year}';
+}
+
 String formatDuration(Duration d) {
   final hours = d.inHours;
   final minutes = d.inMinutes.remainder(60);
@@ -212,4 +305,85 @@ String formatDate(DateTime date) {
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
   return '${months[date.month - 1]} ${date.day}, ${date.year}';
+}
+
+const kRestChoices = [0, 30, 45, 60, 90, 120, 150, 180, 240, 300];
+
+/// "Off", "45s" or "2:30".
+String formatRest(int seconds) {
+  if (seconds <= 0) return 'Off';
+  if (seconds < 60) return '${seconds}s';
+  return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+}
+
+/// Tappable "Rest 2:00" pill that opens a picker of rest durations.
+class RestChip extends StatelessWidget {
+  const RestChip({super.key, required this.seconds, required this.onChanged});
+
+  final int seconds;
+  final ValueChanged<int> onChanged;
+
+  Future<void> _pick(BuildContext context) async {
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Rest timer',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              const Text('Counts down after each set of this exercise.',
+                  style: TextStyle(color: AppColors.textSecondary)),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final s in kRestChoices)
+                    ChoiceChip(
+                      label: Text(formatRest(s)),
+                      selected: s == seconds,
+                      onSelected: (_) => Navigator.pop(context, s),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked != null) onChanged(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final off = seconds <= 0;
+    final color = off ? AppColors.textSecondary : AppColors.accent;
+    return Material(
+      color: color.withValues(alpha: 0.14),
+      shape: const StadiumBorder(),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: () => _pick(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(off ? Icons.timer_off_outlined : Icons.timer_outlined, size: 16, color: color),
+              const SizedBox(width: 4),
+              Text(off ? 'Rest off' : 'Rest ${formatRest(seconds)}',
+                  style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: 13)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

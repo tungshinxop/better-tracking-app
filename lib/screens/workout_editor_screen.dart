@@ -202,6 +202,16 @@ class _ExercisePlanCard extends StatelessWidget {
                 ),
               ],
             ),
+            Padding(
+              padding: const EdgeInsets.only(left: 36, top: 2, bottom: 4),
+              child: RestChip(
+                seconds: plan.restSeconds,
+                onChanged: (seconds) {
+                  plan.restSeconds = seconds;
+                  onChanged();
+                },
+              ),
+            ),
             const Padding(
               padding: EdgeInsets.fromLTRB(4, 4, 8, 4),
               child: Row(

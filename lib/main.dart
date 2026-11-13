@@ -1,6 +1,10 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
+import 'active_workout.dart';
+import 'navigation.dart';
+import 'rest_alerts.dart';
+import 'screens/current_workout_screen.dart';
 import 'screens/exercises_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/workouts_screen.dart';
@@ -9,19 +13,26 @@ import 'theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  final store = AppStore()..load();
-  runApp(BetterTrackingApp(store: store));
+  final store = AppStore();
+  final session = SessionController(store, alerts: NotificationRestAlerts());
+  store.load().then((_) => session.restore());
+  runApp(BetterTrackingApp(store: store, session: session));
 }
 
 class BetterTrackingApp extends StatelessWidget {
-  const BetterTrackingApp({super.key, required this.store});
+  const BetterTrackingApp({super.key, required this.store, required this.session});
 
   final AppStore store;
+  final SessionController session;
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider.value(
-      value: store,
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: store),
+        ChangeNotifierProvider.value(value: session),
+        ChangeNotifierProvider(create: (_) => HomeTabs()),
+      ],
       child: MaterialApp(
         title: 'Better Tracking',
         debugShowCheckedModeBanner: false,
@@ -32,15 +43,8 @@ class BetterTrackingApp extends StatelessWidget {
   }
 }
 
-class HomeShell extends StatefulWidget {
+class HomeShell extends StatelessWidget {
   const HomeShell({super.key});
-
-  @override
-  State<HomeShell> createState() => _HomeShellState();
-}
-
-class _HomeShellState extends State<HomeShell> {
-  int _index = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -48,27 +52,51 @@ class _HomeShellState extends State<HomeShell> {
     if (!loaded) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+    final tabs = context.watch<HomeTabs>();
+    final active = context.select<SessionController, bool>((s) => s.isActive);
+
     return Scaffold(
       body: IndexedStack(
-        index: _index,
-        children: const [WorkoutsScreen(), ExercisesScreen(), HistoryScreen()],
+        index: tabs.index,
+        children: const [
+          WorkoutsScreen(),
+          CurrentWorkoutScreen(),
+          ExercisesScreen(),
+          HistoryScreen(),
+        ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(
-              icon: Icon(Icons.fitness_center_outlined),
-              selectedIcon: Icon(Icons.fitness_center),
-              label: 'Workouts'),
-          NavigationDestination(
-              icon: Icon(Icons.list_alt_outlined),
-              selectedIcon: Icon(Icons.list_alt),
-              label: 'Exercises'),
-          NavigationDestination(
-              icon: Icon(Icons.history_outlined),
-              selectedIcon: Icon(Icons.history),
-              label: 'History'),
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (active && tabs.index != HomeTabs.current) const ResumeWorkoutBar(),
+          NavigationBar(
+            selectedIndex: tabs.index,
+            onDestinationSelected: tabs.go,
+            destinations: [
+              const NavigationDestination(
+                  icon: Icon(Icons.fitness_center_outlined),
+                  selectedIcon: Icon(Icons.fitness_center),
+                  label: 'Workout'),
+              NavigationDestination(
+                  icon: Badge(
+                      isLabelVisible: active,
+                      backgroundColor: AppColors.success,
+                      child: const Icon(Icons.timer_outlined)),
+                  selectedIcon: Badge(
+                      isLabelVisible: active,
+                      backgroundColor: AppColors.success,
+                      child: const Icon(Icons.timer)),
+                  label: 'Current'),
+              const NavigationDestination(
+                  icon: Icon(Icons.list_alt_outlined),
+                  selectedIcon: Icon(Icons.list_alt),
+                  label: 'Exercises'),
+              const NavigationDestination(
+                  icon: Icon(Icons.history_outlined),
+                  selectedIcon: Icon(Icons.history),
+                  label: 'History'),
+            ],
+          ),
         ],
       ),
     );

@@ -92,6 +92,21 @@ class SessionDetailScreen extends StatelessWidget {
         title: Text(session.workoutName),
         actions: [
           IconButton(
+            tooltip: 'Save as template',
+            icon: const Icon(Icons.bookmark_add_outlined),
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
+              final name = await promptText(context,
+                  title: 'Save as template',
+                  initial: session.workoutName,
+                  label: 'Template name',
+                  message: 'Creates a template with these exercises and the sets you logged.');
+              if (name == null || name.isEmpty) return;
+              store.saveSessionAsTemplate(session, name);
+              messenger.showSnackBar(SnackBar(content: Text('Template "$name" created')));
+            },
+          ),
+          IconButton(
             tooltip: 'Delete session',
             icon: const Icon(Icons.delete_outline),
             onPressed: () async {

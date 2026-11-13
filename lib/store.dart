@@ -164,6 +164,53 @@ class AppStore extends ChangeNotifier {
     return history.isEmpty ? const [] : history.last.sets;
   }
 
+  DateTime? lastPerformed(String workoutId) {
+    for (final s in sessions) {
+      if (s.workoutId == workoutId) return s.date;
+    }
+    return null;
+  }
+
+  /// Finds an exercise by name (case-insensitive) or adds it to the library.
+  Exercise ensureExercise(String name, List<String> muscles) {
+    final key = name.trim().toLowerCase();
+    for (final e in exercises) {
+      if (e.name.toLowerCase() == key) return e;
+    }
+    final created = Exercise(id: newId(), name: name.trim(), muscles: [...muscles]);
+    upsertExercise(created);
+    return created;
+  }
+
+  Workout duplicateWorkout(Workout source) {
+    final copy = source.copy();
+    final duplicate = Workout(id: newId(), name: '${source.name} (copy)', exercises: copy.exercises);
+    upsertWorkout(duplicate);
+    return duplicate;
+  }
+
+  /// Creates and saves a template whose planned sets mirror what was logged.
+  Workout saveSessionAsTemplate(Session session, String name,
+      {Map<String, int> restByExercise = const {}}) {
+    final workout = Workout(
+      id: newId(),
+      name: name,
+      exercises: [
+        for (final log in session.logs)
+          WorkoutExercise(
+            exerciseId: log.exerciseId,
+            sets: [
+              for (final s in log.sets)
+                PlannedSet(repsMin: s.reps, repsMax: s.reps, rir: s.rir, weight: s.weight),
+            ],
+            restSeconds: restByExercise[log.exerciseId] ?? kDefaultRestSeconds,
+          ),
+      ],
+    );
+    upsertWorkout(workout);
+    return workout;
+  }
+
   List<Workout> workoutsUsing(String exerciseId) => workouts
       .where((w) => w.exercises.any((e) => e.exerciseId == exerciseId))
       .toList();

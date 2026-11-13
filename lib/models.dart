@@ -80,19 +80,28 @@ class PlannedSet {
       );
 }
 
+const kDefaultRestSeconds = 120;
+
 class WorkoutExercise {
-  WorkoutExercise({required this.exerciseId, List<PlannedSet>? sets})
+  WorkoutExercise(
+      {required this.exerciseId, List<PlannedSet>? sets, this.restSeconds = kDefaultRestSeconds})
       : sets = sets ?? [PlannedSet(), PlannedSet(), PlannedSet()];
 
   final String exerciseId;
   List<PlannedSet> sets;
 
+  /// Rest after each set of this exercise; 0 turns the rest timer off.
+  int restSeconds;
+
   WorkoutExercise copy() => WorkoutExercise(
-      exerciseId: exerciseId, sets: sets.map((s) => s.copy()).toList());
+      exerciseId: exerciseId,
+      sets: sets.map((s) => s.copy()).toList(),
+      restSeconds: restSeconds);
 
   Map<String, dynamic> toJson() => {
         'exerciseId': exerciseId,
         'sets': sets.map((s) => s.toJson()).toList(),
+        'restSeconds': restSeconds,
       };
 
   factory WorkoutExercise.fromJson(Map<String, dynamic> json) =>
@@ -101,6 +110,7 @@ class WorkoutExercise {
         sets: (json['sets'] as List? ?? const [])
             .map((s) => PlannedSet.fromJson(Map<String, dynamic>.from(s)))
             .toList(),
+        restSeconds: json['restSeconds'] as int? ?? kDefaultRestSeconds,
       );
 }
 
